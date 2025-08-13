@@ -81,5 +81,6 @@ The executable will appear in the **`dist/`** folder.
 ---
 
 ## 📧 Contact
-SNEHA GUPTA 
+SNEHA GUPTA
+
 📩 Email: snehaguptta005@gmail.com 
