@@ -7,7 +7,8 @@ Password Generator GUI (Tkinter)
 - Guarantees at least one char from each selected set
 - Strength meter (entropy) + label
 - Generate multiple passwords, copy, save history, export
-- Scrollable History (no duplicates)
+- History prevents duplicates
+- WHOLE WINDOW is scrollable
 """
 
 import math
@@ -26,7 +27,7 @@ MAX_HISTORY = 50
 
 class ScrollFrame(ttk.Frame):
     """Simple vertical scrollable frame (Canvas + inner Frame)."""
-    def __init__(self, parent, height=180, **kwargs):
+    def __init__(self, parent, height=520, **kwargs):
         super().__init__(parent, **kwargs)
         self.canvas = tk.Canvas(self, borderwidth=0, highlightthickness=0, height=height)
         self.vsb = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
@@ -124,16 +125,20 @@ class PasswordApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("🔐 Password Generator")
-        self.resizable(True, True)  # allow resizing so history can grow
-        self.configure(padx=14, pady=14)
+        self.resizable(True, True)
+
+        # Make the WHOLE window scrollable: put everything inside a single ScrollFrame
+        self.page_scroll = ScrollFrame(self, height=520)
+        self.page_scroll.pack(fill="both", expand=True)
+        page = self.page_scroll.inner  # build UI on this 'page' frame
 
         # State
         self.history: list[str] = []
         self.history_set: set[str] = set()  # ensures uniqueness in history
 
         # --- Controls frame ---
-        frm = ttk.LabelFrame(self, text="Options")
-        frm.grid(row=0, column=0, sticky="ew", padx=2, pady=(0,8))
+        frm = ttk.LabelFrame(page, text="Options")
+        frm.grid(row=0, column=0, sticky="ew", padx=12, pady=(12,10))
 
         # Length (create scale first without command to avoid early callback)
         self.len_var = tk.IntVar(value=16)
@@ -199,23 +204,21 @@ class PasswordApp(tk.Tk):
         ttk.Button(btns, text="Export History", command=self.export_history).grid(row=0, column=2)
 
         # --- Output frame ---
-        out_frame = ttk.LabelFrame(self, text="Generated Passwords")
-        out_frame.grid(row=1, column=0, sticky="ew", padx=2, pady=(0,8))
+        out_frame = ttk.LabelFrame(page, text="Generated Passwords")
+        out_frame.grid(row=1, column=0, sticky="ew", padx=12, pady=(0,10))
         self.out_container = ttk.Frame(out_frame)
-        self.out_container.grid(row=0, column=0, sticky="ew")
+        self.out_container.grid(row=0, column=0, sticky="ew", padx=6, pady=6)
         out_frame.columnconfigure(0, weight=1)
 
-        # --- History frame (scrollable) ---
-        hist_frame = ttk.LabelFrame(self, text="History (last 50)")
-        hist_frame.grid(row=2, column=0, sticky="nsew", padx=2)
-        # Let history row expand
-        self.grid_rowconfigure(2, weight=1)
-        self.grid_columnconfigure(0, weight=1)
+        # --- History frame (also within the scrollable page) ---
+        hist_frame = ttk.LabelFrame(page, text="History (last 50)")
+        hist_frame.grid(row=2, column=0, sticky="ew", padx=12, pady=(0,12))
+        self.hist_container = ttk.Frame(hist_frame)
+        self.hist_container.grid(row=0, column=0, sticky="ew", padx=6, pady=6)
+        hist_frame.columnconfigure(0, weight=1)
 
-        # Scrollable history container
-        self.hist_scroll = ScrollFrame(hist_frame, height=180)
-        self.hist_scroll.pack(fill="both", expand=True, padx=4, pady=4)
-        self.hist_container = self.hist_scroll.inner  # use this in render_history()
+        # Page layout stretch
+        page.grid_columnconfigure(0, weight=1)
 
         # Initial entropy
         self.update_entropy()
@@ -375,5 +378,5 @@ class PasswordApp(tk.Tk):
 
 if __name__ == "__main__":
     app = PasswordApp()
-    app.minsize(720, 560)  # a bit taller to show the scroll area nicely
+    app.minsize(720, 560)
     app.mainloop()
