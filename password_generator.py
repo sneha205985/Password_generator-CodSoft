@@ -7,6 +7,8 @@ Password Generator GUI (Tkinter)
 - Guarantees at least one char from each selected set
 - Strength meter (entropy) + label
 - Generate multiple passwords, copy, save history, export
+- History section is now scrollable
+- History prevents duplicates (no password saved twice)
 """
 
 import math
@@ -20,6 +22,43 @@ from tkinter import ttk, messagebox, filedialog
 SYMBOLS = "!@#$%^&*-=+_?~"  # friendly symbols
 AMBIGUOUS = set("O0oIl1|`'\";:,.{}[]()<>")  # remove when 'exclude ambiguous' is on
 MAX_HISTORY = 50
+
+# ------------- Scrollable Frame -------------
+
+class ScrollFrame(ttk.Frame):
+    """Simple vertical scrollable frame (Canvas + inner Frame)."""
+    def __init__(self, parent, height=180, **kwargs):
+        super().__init__(parent, **kwargs)
+        self.canvas = tk.Canvas(self, borderwidth=0, highlightthickness=0, height=height)
+        self.vsb = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=self.vsb.set)
+
+        self.vsb.pack(side="right", fill="y")
+        self.canvas.pack(side="left", fill="both", expand=True)
+
+        self.inner = ttk.Frame(self.canvas)
+        self.inner_id = self.canvas.create_window((0, 0), window=self.inner, anchor="nw")
+
+        self.inner.bind("<Configure>", self._on_frame_configure)
+        self.canvas.bind("<Configure>", self._on_canvas_configure)
+
+        # Mouse/trackpad scrolling
+        self._bind_mousewheel(self.inner)
+
+    def _on_frame_configure(self, _event=None):
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+    def _on_canvas_configure(self, event):
+        # Make inner frame width follow the canvas
+        self.canvas.itemconfig(self.inner_id, width=event.width)
+
+    def _bind_mousewheel(self, widget):
+        widget.bind_all("<MouseWheel>", self._on_mousewheel, add="+")   # Win/macOS
+        widget.bind_all("<Button-4>", lambda e: self.canvas.yview_scroll(-1, "units"), add="+")  # Linux
+        widget.bind_all("<Button-5>", lambda e: self.canvas.yview_scroll( 1, "units"), add="+")  # Linux
+
+    def _on_mousewheel(self, event):
+        self.canvas.yview_scroll(int(-event.delta/120), "units")
 
 # ------------- Helpers -------------
 
@@ -38,7 +77,7 @@ def build_charset(use_lower, use_upper, use_digits, use_symbols, exclude_ambiguo
         pool = "".join(ch for ch in pool if ch not in AMBIGUOUS)
         if not pool:
             raise ValueError("All characters were excluded. Relax options.")
-        # Also filter each set for consistency
+        # filter each set too
         filtered = []
         for s in sets:
             s2 = "".join(ch for ch in s if ch not in AMBIGUOUS)
@@ -50,8 +89,6 @@ def build_charset(use_lower, use_upper, use_digits, use_symbols, exclude_ambiguo
     return sets, pool
 
 def crypto_randbelow(n: int) -> int:
-    """Return a secure random int in [0, n)."""
-    # secrets.randbelow is already crypto-secure:
     return secrets.randbelow(n)
 
 def choice(pool: str) -> str:
@@ -63,7 +100,6 @@ def generate_one(length: int, selected_sets: list[str], pool: str) -> str:
         raise ValueError(f"Length must be at least {len(selected_sets)} to include one of each selected type.")
 
     pwd = [choice(s) for s in selected_sets]  # guarantee step
-    # fill remaining
     for _ in range(length - len(pwd)):
         pwd.append(choice(pool))
     # Fisher–Yates shuffle
@@ -89,11 +125,12 @@ class PasswordApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("🔐 Password Generator")
-        self.resizable(False, False)
+        self.resizable(True, True)  # allow resizing so history can grow
         self.configure(padx=14, pady=14)
 
         # State
         self.history: list[str] = []
+        self.history_set: set[str] = set()  # <-- ensures uniqueness in history
 
         # --- Controls frame ---
         frm = ttk.LabelFrame(self, text="Options")
@@ -165,12 +202,17 @@ class PasswordApp(tk.Tk):
         self.out_container.grid(row=0, column=0, sticky="ew")
         out_frame.columnconfigure(0, weight=1)
 
-        # --- History frame ---
+        # --- History frame (scrollable) ---
         hist_frame = ttk.LabelFrame(self, text="History (last 50)")
-        hist_frame.grid(row=2, column=0, sticky="ew", padx=2)
-        self.hist_container = ttk.Frame(hist_frame)
-        self.hist_container.grid(row=0, column=0, sticky="ew")
-        hist_frame.columnconfigure(0, weight=1)
+        hist_frame.grid(row=2, column=0, sticky="nsew", padx=2)
+        # Let history row expand
+        self.grid_rowconfigure(2, weight=1)
+        self.grid_columnconfigure(0, weight=1)
+
+        # Scrollable history container
+        self.hist_scroll = ScrollFrame(hist_frame, height=180)
+        self.hist_scroll.pack(fill="both", expand=True, padx=4, pady=4)
+        self.hist_container = self.hist_scroll.inner  # use this in render_history()
 
         # Initial entropy
         self.update_entropy()
@@ -202,7 +244,7 @@ class PasswordApp(tk.Tk):
             lbl = strength_label(b)
             self.entropy_label.config(text=f"Entropy: {b} bits")
             self.strength_lbl.config(text=lbl)
-            # Map bits (0..100+) to 0..100 bar
+            # Map bits (0..100+) to a simple 0..100 bar scale
             pct = 95 if b >= 80 else 75 if b >= 60 else 50 if b >= 40 else 25 if b > 0 else 0
             self.entropy_bar['value'] = pct
         except Exception:
@@ -232,9 +274,17 @@ class PasswordApp(tk.Tk):
         ttk.Button(row, text="Copy", command=do_copy).pack(side="left", padx=(0,6))
 
         def save_to_history():
-            self.history.append(ent.get())
+            pwd = ent.get()
+            # Prevent duplicates
+            if pwd in self.history_set:
+                messagebox.showinfo("Skipped", "This password is already in history.")
+                return
+            self.history.append(pwd)
+            self.history_set.add(pwd)
+            # Enforce MAX_HISTORY (drop oldest and remove from set)
             if len(self.history) > MAX_HISTORY:
-                self.history = self.history[-MAX_HISTORY:]
+                oldest = self.history.pop(0)
+                self.history_set.discard(oldest)
             self.render_history()
             messagebox.showinfo("Saved", "Added to history.")
 
@@ -261,6 +311,7 @@ class PasswordApp(tk.Tk):
             def delete_one(txt=pw, frame=r):
                 try:
                     self.history.remove(txt)
+                    self.history_set.discard(txt)  # keep set in sync
                 except ValueError:
                     pass
                 frame.destroy()
@@ -320,4 +371,5 @@ class PasswordApp(tk.Tk):
 
 if __name__ == "__main__":
     app = PasswordApp()
+    app.minsize(720, 560)  # a bit taller to show the scroll area nicely
     app.mainloop()
