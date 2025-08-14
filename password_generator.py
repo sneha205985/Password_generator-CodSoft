@@ -7,8 +7,7 @@ Password Generator GUI (Tkinter)
 - Guarantees at least one char from each selected set
 - Strength meter (entropy) + label
 - Generate multiple passwords, copy, save history, export
-- History section is now scrollable
-- History prevents duplicates (no password saved twice)
+- Scrollable History (no duplicates)
 """
 
 import math
@@ -130,22 +129,26 @@ class PasswordApp(tk.Tk):
 
         # State
         self.history: list[str] = []
-        self.history_set: set[str] = set()  # <-- ensures uniqueness in history
+        self.history_set: set[str] = set()  # ensures uniqueness in history
 
         # --- Controls frame ---
         frm = ttk.LabelFrame(self, text="Options")
         frm.grid(row=0, column=0, sticky="ew", padx=2, pady=(0,8))
 
-        # Length
+        # Length (create scale first without command to avoid early callback)
         self.len_var = tk.IntVar(value=16)
         ttk.Label(frm, text="Length:").grid(row=0, column=0, sticky="w", padx=(8,6), pady=8)
-        self.len_scale = ttk.Scale(frm, from_=6, to=64, orient="horizontal",
-                                   command=self._on_len_slide)
-        self.len_scale.set(self.len_var.get())
+
+        self.len_scale = ttk.Scale(frm, from_=6, to=64, orient="horizontal")
+        self.len_scale.set(self.len_var.get())  # safe initial set (no callback yet)
         self.len_scale.grid(row=0, column=1, sticky="ew", padx=(0,8), pady=8)
         frm.columnconfigure(1, weight=1)
-        self.len_label = ttk.Label(frm, text="16")
+
+        self.len_label = ttk.Label(frm, text=str(self.len_var.get()))
         self.len_label.grid(row=0, column=2, sticky="e", padx=(0,8), pady=8)
+
+        # Now attach the callback after label exists
+        self.len_scale.configure(command=self._on_len_slide)
 
         # Checkboxes
         self.lower_var  = tk.BooleanVar(value=True)
@@ -228,7 +231,8 @@ class PasswordApp(tk.Tk):
     # ---- UI callbacks ----
 
     def _on_len_slide(self, _):
-        val = int(self.len_scale.get())
+        # Scale passes a float string during drag; normalize to int
+        val = int(float(self.len_scale.get()))
         self.len_var.set(val)
         self.len_label.config(text=str(val))
         self.update_entropy()
